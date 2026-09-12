@@ -3,6 +3,7 @@
 #import "GrokBilling.h"
 #import "GrokAuth.h"
 #import "GrokIcon.h"
+#import "GrokUpdater.h"
 #import <Cocoa/Cocoa.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <math.h>
@@ -33,6 +34,7 @@ static NSString * const StartupLabel = @"com.local.autostart.grok-cli-usage";
 @property(nonatomic, strong) NSDictionary *latestState;
 @property(nonatomic, strong) NSImage *grokIcon;
 @property(nonatomic, copy) NSString *launchAtLoginError;
+@property(nonatomic, assign) BOOL checkingForUpdates;
 @end
 
 @implementation AppDelegate
@@ -311,6 +313,13 @@ static NSString * const StartupLabel = @"com.local.autostart.grok-cli-usage";
                                               keyEquivalent:@"r"];
     refresh.target = self;
     [menu addItem:refresh];
+
+    NSMenuItem *updates = [[NSMenuItem alloc] initWithTitle:self.checkingForUpdates ? @"Checking for Updates…" : @"Check for Updates"
+                                                     action:@selector(checkForUpdates)
+                                              keyEquivalent:@"u"];
+    updates.target = self;
+    updates.enabled = !self.checkingForUpdates;
+    [menu addItem:updates];
 
     NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"Quit"
                                                   action:@selector(quit)
@@ -1132,6 +1141,101 @@ static NSString * const StartupLabel = @"com.local.autostart.grok-cli-usage";
     [NSApp terminate:nil];
 }
 
+- (NSAlert *)alertWithTitle:(NSString *)title message:(NSString *)message {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = title ?: @"";
+    alert.informativeText = message ?: @"";
+    alert.alertStyle = NSAlertStyleInformational;
+    return alert;
+}
+
+- (void)checkForUpdates {
+    if (self.checkingForUpdates) {
+        return;
+    }
+    self.checkingForUpdates = YES;
+    self.statusItem.menu = [self menuForCurrentState];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSDictionary *update = GrokCheckForUpdates();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.checkingForUpdates = NO;
+            self.statusItem.menu = [self menuForCurrentState];
+            [self handleUpdateCheckResult:update];
+        });
+    });
+}
+
+- (void)handleUpdateCheckResult:(NSDictionary *)update {
+    [NSApp activateIgnoringOtherApps:YES];
+    NSNumber *ok = update[@"ok"];
+    if (![ok respondsToSelector:@selector(boolValue)] || ![ok boolValue]) {
+        NSAlert *alert = [self alertWithTitle:@"Could not check for updates"
+                                      message:update[@"error"] ?: @"The GitHub remote could not be reached."];
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        return;
+    }
+
+    if (![update[@"updateAvailable"] boolValue]) {
+        NSString *sha = GrokShortGitSHA(update[@"remoteSHA"] ?: update[@"currentSHA"]);
+        NSAlert *alert = [self alertWithTitle:@"No updates"
+                                      message:sha.length > 0
+                                          ? [NSString stringWithFormat:@"You're on the latest main commit (%@).", sha]
+                                          : @"You're on the latest main commit."];
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        return;
+    }
+
+    NSAlert *alert = [self alertWithTitle:@"Update?"
+                                  message:GrokUpdatePromptText(update)];
+    [alert addButtonWithTitle:@"Yes"];
+    [alert addButtonWithTitle:@"No"];
+    if ([alert runModal] != NSAlertFirstButtonReturn) {
+        return;
+    }
+    [self applyUpdate];
+}
+
+- (void)applyUpdate {
+    self.checkingForUpdates = YES;
+    self.statusItem.menu = [self menuForCurrentState];
+    NSString *installPath = NSBundle.mainBundle.bundlePath;
+    if (![installPath.pathExtension isEqualToString:@"app"]) {
+        installPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Applications/Grok CLI Usage Menu Bar.app"];
+    }
+
+    NSError *pauseError = nil;
+    [self.startup pause:&pauseError];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *error = nil;
+        NSDictionary *result = GrokApplyGitPullAndRebuild(installPath, &error);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.checkingForUpdates = NO;
+            self.statusItem.menu = [self menuForCurrentState];
+            if (![result[@"ok"] boolValue]) {
+                [NSApp activateIgnoringOtherApps:YES];
+                NSAlert *alert = [self alertWithTitle:@"Update failed"
+                                              message:result[@"error"] ?: error.localizedDescription ?: @"Unknown error"];
+                [alert addButtonWithTitle:@"OK"];
+                [alert runModal];
+                [self ensureLaunchAtLoginIfPreferred];
+                return;
+            }
+            NSString *appPath = result[@"appPath"] ?: installPath;
+            NSTask *open = [[NSTask alloc] init];
+            open.executableURL = [NSURL fileURLWithPath:@"/usr/bin/open"];
+            open.arguments = @[@"-g", @"-n", appPath];
+            [open launch];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [NSApp terminate:nil];
+            });
+        });
+    });
+}
+
 - (BOOL)renderPreviewAtPath:(NSString *)path
                 displayMode:(NSString *)displayMode
                       error:(NSError **)error {
@@ -1226,6 +1330,17 @@ int main(int argc, const char *argv[]) {
         }
         if (argc > 1 && strcmp(argv[1], "--dump-usage") == 0) {
             return RunDumpUsage();
+        }
+        if (argc > 1 && strcmp(argv[1], "--check-updates") == 0) {
+            NSDictionary *update = GrokCheckForUpdates();
+            NSData *data = [NSJSONSerialization isValidJSONObject:update]
+                ? [NSJSONSerialization dataWithJSONObject:update options:NSJSONWritingPrettyPrinted error:nil]
+                : nil;
+            if (data != nil) {
+                fwrite(data.bytes, 1, data.length, stdout);
+                fputc('\n', stdout);
+            }
+            return [update[@"ok"] boolValue] ? 0 : 1;
         }
         if (argc > 2 && strcmp(argv[1], "--render-icon") == 0) {
             [NSApplication sharedApplication];

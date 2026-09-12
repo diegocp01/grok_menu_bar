@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="Grok CLI Usage Menu Bar"
 BUNDLE_ID="com.local.grok-cli-usage-menu-bar"
 VERSION="${VERSION:-0.1.0}"
+GIT_COMMIT="${GIT_COMMIT:-$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)}"
+GIT_REMOTE="${GIT_REMOTE:-$(git -C "$ROOT_DIR" remote get-url origin 2>/dev/null || true)}"
+GIT_COMMIT="${GIT_COMMIT:-unknown}"
+GIT_REMOTE="${GIT_REMOTE:-https://github.com/diegocp01/grok_menu_bar.git}"
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/.build/release}"
 FINAL_APP_DIR="$OUT_DIR/$APP_NAME.app"
 STAGING_ROOT="$(mktemp -d "${TMPDIR:-/private/tmp}/grok-cli-usage-menu-bar-build.XXXXXX")"
@@ -66,6 +70,10 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>GrokGitCommit</key>
+  <string>$GIT_COMMIT</string>
+  <key>GrokGitRemote</key>
+  <string>$GIT_REMOTE</string>
 </dict>
 </plist>
 PLIST

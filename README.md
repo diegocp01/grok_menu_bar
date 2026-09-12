@@ -20,6 +20,7 @@ Click the menu-bar item to choose:
 - Reset clock time, a live countdown to reset, or **Hide Time** to show only the icon and battery (or percentage) for a narrower menu-bar item.
 - Refresh interval: 30 seconds, 1 minute, 3 minutes, or 5 minutes.
 - Automatic login startup and restart after exits, with a menu opt-out.
+- **Check for Updates** compares this build to GitHub `main` (new commits and merged PRs). If something is new, it asks **Update?**; **Yes** `git pull`s, rebuilds, and restarts.
 
 The menu-bar icon is the Grok black-hole G-mark. This tracks **Grok CLI / Grok Build** credits, not Cursor Grok Bot.
 
