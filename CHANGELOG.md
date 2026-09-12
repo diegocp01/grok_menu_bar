@@ -10,3 +10,4 @@ All notable changes to this project will be documented here.
 - Add daily/weekly widget selection, configurable refresh intervals, and Launch at Login by default.
 - Read the existing `grok login` session from `~/.grok/auth.json` and call the same billing endpoint as `/usage`.
 - Fall back to the last good snapshot when a live fetch fails.
+- Add Check for Updates: compare to GitHub `main`, confirm with Update?, then git pull, rebuild, and restart.
